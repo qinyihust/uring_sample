@@ -51,7 +51,6 @@ Libaio::~Libaio() {
 
 int Libaio::SubmitIo(IoTask *task) {
     iocb *iocbp = new(iocb);
-    memset(iocbp, 0, sizeof(iocb));
     if (task->isRead)
         io_prep_preadv(iocbp, task->fd, &(task->iov), 1, task->offset);
     else
@@ -75,7 +74,7 @@ IoTask *Libaio::ReapIo() {
     iocb *iocbp = event.obj;
     assert(task == iocbp->data);
     delete iocbp;
-    task->res = event.res2; // res is r/w length, res2 is operation result
+    task->res = event.res; // res: +x for done length, -x for error code
 
     return task;
 }

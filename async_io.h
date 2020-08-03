@@ -12,6 +12,7 @@
 struct IoTask;
 typedef void (*IocbFunc)(IoTask *task);
 struct IoTask {
+    int index; // thread index
     int fd;
     bool isRead;
     off_t first_offset, offset;

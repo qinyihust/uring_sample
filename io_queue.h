@@ -14,6 +14,7 @@
 enum class IoEngine {
     IO_ENGINE_LIBAIO,
     IO_ENGINE_URING,
+    IO_ENGINE_NONE,
 };
 
 class Submitter {
