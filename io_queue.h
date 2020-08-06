@@ -51,7 +51,7 @@ public:
 
     void Push(IoTask *task){
         mtx_.lock();
-        tasks_.push(task);
+        tasks_.push_back(task);
         mtx_.unlock();
     }
     
@@ -67,20 +67,31 @@ private:
 
             submitter->mtx_.lock();
             IoTask *task = submitter->tasks_.front();
-            if (task == nullptr || submitter->ioChannel_->SubmitIo(task)) {
-                submitter->mtx_.unlock();
+	    if (task == nullptr) {
+		submitter->mtx_.unlock();
+		usleep(100);
+		continue;
+	    }
+            submitter->tasks_.pop_front();
+            submitter->mtx_.unlock();
+
+	    int ret = 0;
+	    if (ret = submitter->ioChannel_->SubmitIo(task)) {
+	        perror("submit failed");
+	        submitter->mtx_.lock();
+	        submitter->tasks_.push_front(task);
+	        submitter->mtx_.unlock();
+		// wait and retry
                 usleep(100);
                 continue;
             }
-            submitter->tasks_.pop();
-            submitter->mtx_.unlock();
         }
     }
 
 private:
     AsyncIo *ioChannel_;
     pthread_t tidp_;
-    std::queue<IoTask *> tasks_;
+    std::deque<IoTask *> tasks_;
     std::mutex mtx_;
 };
 
