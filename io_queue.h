@@ -98,7 +98,7 @@ private:
 class Reaper {
 public:
     int Run(AsyncIo *ioChannel) {
-        if(pthread_create(&tidp_, nullptr, CbHandler, ioChannel)) {
+        if(pthread_create(&tidp_, nullptr, IoReaper, ioChannel)) {
             perror("create reaper failed");
             return -1;
         }
@@ -110,7 +110,7 @@ public:
     }
 
 private:
-    static void *CbHandler(void *arg) {
+    static void *IoReaper(void *arg) {
         AsyncIo *ioChannel = (AsyncIo *)arg;
         while (1) {
             pthread_testcancel();
@@ -126,4 +126,67 @@ private:
 
     pthread_t tidp_;
 };
+
+class CallbackWorker {
+public:
+    ~CallbackWorker() {
+        pthread_cancel(tid_);
+        pthread_join(tid_, nullptr);
+    }
+
+    int Run() {
+        if(pthread_create(&tid_, nullptr, CbWoker, (void *)this)) {
+            perror("create callback worker failed");
+            return -1;
+        }
+
+        return 0;
+    }
+private:
+    static void *CbWoker(void *arg) {
+        CallbackWorker *worker = (CallbackWorker *)arg;
+        while (1) {
+            pthread_testcancel();
+            worker->lock_.lock();
+            IoTask *task = worker->queue_.front();
+            if (task == nullptr) {
+                worker->lock_.unlock();
+                usleep(100);
+                continue;
+            }
+            worker->queue_.pop();
+            worker->lock_.unlock();
+
+            assert(task->cb != nullptr);
+            task->cb(task);
+        }
+    }
+
+private:
+    pthread_t tid_;
+    std::queue<IoTask *> queue_;
+    std::mutex lock_;
+};
+
+class CallbackPool {
+public:
+    explicit CallbackPool (unsigned pool_size) : poolSize_ (pool_size) { }
+    ~CallbackPool(){
+        for (unsigned i = 0; i < poolSize_; i++)
+            delete workers_[i];
+        delete workers_;
+    }
+    int Run() {
+        workers_ = new CallbackWorker*[poolSize_];
+        for (unsigned i = 0; i < poolSize_; i++) {
+            workers_[i] = new CallbackWorker;
+            assert(!workers_[i]->Run());
+        }
+    }
+
+private:
+    unsigned poolSize_;
+    CallbackWorker **workers_;
+};
+
 #endif // IO_QUEUE_H_
