@@ -2,18 +2,25 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
-
+#include <stdlib.h>
+#include <cstdint>
+#include <atomic>
 #include "io_queue.h"
 
-#define QD	64
 #define BS	(4*1024)
-#define NR_THREAD 10
+#define NR_THREAD 1
+#define IO_NUM 10000000
+#define IO_DEPTH 256
+
+std::atomic<uint32_t> nr_flying_io{0};
 
 struct TestEnv {
     int index;
     Submitter *submitter;
     int fd;
 };
+
+void *iobuf=nullptr;
 
 int queueIo(TestEnv *env, off_t offset, off_t len, bool isRead, void *buf, IocbFunc cb, void *arg) {
     IoTask *task = (IoTask *)malloc(sizeof(*task));
@@ -60,34 +67,53 @@ void cb0(IoTask *task) {
     // send write I/O
     task->isRead = false;
     memset(task->iov.iov_base, num, BS);
-    task->cb = cb1;
+    task->cb = cb0;
     task->res = -1;
     Submitter *submitter = (Submitter *)task->arg;
     submitter->Push(task);
 }
 
+void countdown(IoTask *task) {
+    --nr_flying_io;
+    delete task;
+}
+
 void *SendIo(void *arg) {
     TestEnv *env = (TestEnv *)arg;
     int idx = env->index;
-    char *data = nullptr;
-    posix_memalign((void **)&data, getpagesize(), BS);
-    memset(data, 0, BS);
-    std::cout << "thread " << env->index << ": read testfile" << std::endl;
-    queueIo(env, 0, BS, true, data, cb0, nullptr);
+    //std::cout << "thread " << env->index << ": read testfile" << std::endl;
+        
+    srand(time(NULL));
+    int i = 0;
+    for (i=0; i < IO_NUM; ++i) {
+       while (nr_flying_io >= IO_DEPTH)
+           usleep(100);
+       
+       ++nr_flying_io;
+       off_t offset = ((off_t)rand() >> 7) << 12 ;    // max 67G
+       //off_t offset = rand();
+       //std::cout << "rand=" << offset << std::endl;
+       //offset = offset >> 7;
+       //std::cout << "reduce=" << offset << std::endl;
+       //offset = offset << 12;
+       //std::cout << "offset=" << offset << std::endl;
+       queueIo(env, offset, BS, false, iobuf, countdown, nullptr);
+    }
 
-    sleep(3);
+    //sleep(3);
     return nullptr;
 }
 
 int main(int argc, const char* argv[]) {
     int ret = 0;
 
+#ifdef ENABLE_URING 
     if (argc != 2) {
 	std::cout << "usage: " << argv[0] << " [option]" << std::endl;
 	std::cout << "option: libaio or uring" << std::endl;
         return -1;
     }
-    
+
     IoEngine engine = IoEngine::IO_ENGINE_NONE;
     if (!strncmp(argv[1], "libaio", 7))
 	engine = IoEngine::IO_ENGINE_LIBAIO;
@@ -98,8 +124,11 @@ int main(int argc, const char* argv[]) {
         std::cout << "option: libaio or uring" << std::endl;
         return -1;
     }
-    	
-    Submitter submitter(engine, QD);
+#else
+    IoEngine engine = IoEngine::IO_ENGINE_LIBAIO;
+#endif
+
+    Submitter submitter(engine, IO_DEPTH);
     if (submitter.Run())
         return -1;
 
@@ -109,10 +138,14 @@ int main(int argc, const char* argv[]) {
         return -1;
     }
 
-    int fd = open("testfile", O_RDWR | O_CREAT | O_DIRECT, 0644);
+    int fd = open("mnt/testfile", O_RDWR | O_CREAT | O_DIRECT, 0644);
     if (fd < 0) {
         perror("open file");
         return -1;
+    }
+    if (posix_memalign(&iobuf, getpagesize(), BS)) {
+         std::cerr << "failed to alloc memory" << std::endl;
+	 return -1;
     }
 
     pthread_t tidp[NR_THREAD];

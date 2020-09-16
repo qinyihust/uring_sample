@@ -1,11 +1,13 @@
-#include "async_io.h"
 #include <libaio.h>
 #include <memory.h>
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+#include <iostream>
+#include "async_io.h"
 
+#ifdef ENABLE_URING
 Uring::Uring(unsigned ioDepth) {
     assert(!io_uring_queue_init(ioDepth, &ring_, 0));
 }
@@ -40,6 +42,7 @@ IoTask *Uring::ReapIo() {
 
     return task;
 }
+#endif
 
 Libaio::Libaio(unsigned ioDepth) {
     assert(!io_setup(ioDepth, &ctx_));
@@ -57,7 +60,9 @@ int Libaio::SubmitIo(IoTask *task) {
         io_prep_pwritev(iocbp, task->fd, &(task->iov), 1, task->offset);
     iocbp->data = task;
 
-    if (io_submit(ctx_, 1, &iocbp) < 0) {
+    int ret = io_submit(ctx_, 1, &iocbp);
+    if (ret < 0) {
+        std::cout << "error submit, ret=" << ret << std::endl;
         perror("failed to submit libaio");
         return -1;
     }

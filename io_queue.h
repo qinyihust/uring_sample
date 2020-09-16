@@ -24,9 +24,11 @@ public:
     case IoEngine::IO_ENGINE_LIBAIO:
       ioChannel_ = new Libaio(ioDepth);
       break;
+#ifdef ENABLE_URING
     case IoEngine::IO_ENGINE_URING:
       ioChannel_ = new Uring(ioDepth);
       break;
+#endif
     default:
       assert(0);
     }

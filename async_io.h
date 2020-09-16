@@ -7,7 +7,11 @@
 #define ASYNC_IO_H_
 
 #include <libaio.h>
+#include <fcntl.h>
+
+#ifdef ENABLE_URING
 #include "liburing.h"
+#endif
 
 struct IoTask;
 typedef void (*IocbFunc)(IoTask *task);
@@ -17,7 +21,7 @@ struct IoTask {
     bool isRead;
     off_t first_offset, offset;
     size_t first_len;
-    struct iovec iov;
+    iovec iov;
     int res;
     IocbFunc cb;
     void *arg;
@@ -29,6 +33,7 @@ public:
     virtual IoTask *ReapIo() { return nullptr; }
 };
 
+#ifdef ENABLE_URING
 class Uring: public AsyncIo {
 public:
     explicit Uring(unsigned ioDepth);
@@ -39,6 +44,7 @@ public:
 private:
     struct io_uring ring_;
 };
+#endif
 
 class Libaio: public AsyncIo {
 public:
